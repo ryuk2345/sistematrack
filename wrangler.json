@@ -1,9 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "019b3d87-9f36-739d-ba7b-71edf674fa8e",
+  "name": "sistema-motorizados",
   "main": "./src/worker/index.ts",
   "compatibility_date": "2025-06-17",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
     "enabled": true
   },
@@ -14,14 +16,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "019b3d87-9f36-739d-ba7b-71edf674fa8e",
-      "database_id": "019b3d87-9f36-739d-ba7b-71edf674fa8e"
+      "database_name": "sistema-motorizados-db",
+      "database_id": "bf9cf188-d1f5-4683-82be-45c4e6213516"
     }
   ],
   "r2_buckets": [
     {
       "binding": "R2_BUCKET",
-      "bucket_name": "019b3d87-9f36-739d-ba7b-71edf674fa8e"
+      "bucket_name": "sistema-motorizados-storage"
     }
   ]
 }

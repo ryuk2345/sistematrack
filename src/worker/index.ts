@@ -10,6 +10,13 @@ import {
 } from "@getmocha/users-service/backend";
 import { getCookie, setCookie } from "hono/cookie";
 
+interface Env {
+  DB: D1Database;
+  R2_BUCKET: R2Bucket;
+  MOCHA_USERS_SERVICE_API_URL: string;
+  MOCHA_USERS_SERVICE_API_KEY: string;
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
 // ============= AUTH ENDPOINTS =============

@@ -12,9 +12,9 @@ import { getCookie, setCookie } from "hono/cookie";
 
 interface Env {
   DB: D1Database;
-  R2_BUCKET: R2Bucket;
-  MOCHA_USERS_SERVICE_API_URL: string;
-  MOCHA_USERS_SERVICE_API_KEY: string;
+  R2_BUCKET?: R2Bucket;
+  MOCHA_USERS_SERVICE_API_URL?: string;
+  MOCHA_USERS_SERVICE_API_KEY?: string;
 }
 
 // Resilient DB accessor: supports binding named "DB" or "base de datos"
@@ -336,8 +336,8 @@ app.post("/api/sessions", async (c) => {
     }
 
     const sessionToken = await exchangeCodeForSessionToken(body.code, {
-      apiUrl: c.env.MOCHA_USERS_SERVICE_API_URL,
-      apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY,
+      apiUrl: c.env.MOCHA_USERS_SERVICE_API_URL || "",
+      apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY || "",
     });
 
     setCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME, sessionToken, {
@@ -377,7 +377,7 @@ app.get("/api/logout", async (c) => {
   if (typeof sessionToken === "string" && c.env.MOCHA_USERS_SERVICE_API_URL) {
     await deleteSession(sessionToken, {
       apiUrl: c.env.MOCHA_USERS_SERVICE_API_URL,
-      apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY,
+      apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY || "",
     }).catch(() => {});
   }
 

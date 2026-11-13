@@ -19,11 +19,5 @@
       "database_name": "sistema-motorizados-db",
       "database_id": "bf9cf188-d1f5-4683-82be-45c4e6213516"
     }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "R2_BUCKET",
-      "bucket_name": "sistema-motorizados-storage"
-    }
   ]
 }

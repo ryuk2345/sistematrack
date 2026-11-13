@@ -13,21 +13,36 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem("sistematrack_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch (_) {
+      return null;
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await fetch("/api/users/me");
+      const token = localStorage.getItem("sistematrack_token");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch("/api/users/me", { headers });
       if (res.ok) {
         const userData = await res.json();
         setUser(userData);
-      } else {
+        localStorage.setItem("sistematrack_user", JSON.stringify(userData));
+      } else if (res.status === 401) {
         setUser(null);
+        localStorage.removeItem("sistematrack_user");
+        localStorage.removeItem("sistematrack_token");
       }
     } catch (err) {
       console.error("Error fetching user session:", err);
-      setUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -45,12 +60,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ username, password: passwordOrPin }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      const resText = await res.text();
+      try {
+        data = JSON.parse(resText);
+      } catch (_) {
+        return {
+          success: false,
+          error: resText.slice(0, 100) || ("Error HTTP " + res.status),
+        };
+      }
+
       if (!res.ok) {
         return { success: false, error: data.error || "Credenciales incorrectas" };
       }
 
-      setUser(data.user);
+      if (data.token) {
+        localStorage.setItem("sistematrack_token", data.token);
+      }
+      if (data.user) {
+        localStorage.setItem("sistematrack_user", JSON.stringify(data.user));
+        setUser(data.user);
+      }
+
       return { success: true, user: data.user };
     } catch (err) {
       return {
@@ -62,6 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
+      localStorage.removeItem("sistematrack_user");
+      localStorage.removeItem("sistematrack_token");
       await fetch("/api/auth/logout", { method: "POST" });
       await fetch("/api/logout").catch(() => {});
     } catch (err) {
@@ -76,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/oauth/google/redirect_url");
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Google OAuth aún no está configurado");
       }
       const data = await res.json();
@@ -111,4 +145,3 @@ export function useAuth() {
   }
   return context;
 }
-

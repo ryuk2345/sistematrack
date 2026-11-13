@@ -12,13 +12,20 @@ export default function DriverView() {
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
+  const getAuthHeaders = (): Record<string, string> => {
+    const token = localStorage.getItem("sistematrack_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // Fetch driver profile
   useEffect(() => {
     if (!user) return;
 
     const fetchProfile = async () => {
       try {
-        const response = await fetch("/api/driver/profile");
+        const response = await fetch("/api/driver/profile", {
+          headers: getAuthHeaders(),
+        });
         if (response.ok) {
           const data = await response.json();
           setDriver(data);
@@ -39,7 +46,9 @@ export default function DriverView() {
 
     const fetchOrders = async () => {
       try {
-        const response = await fetch("/api/driver/orders");
+        const response = await fetch("/api/driver/orders", {
+          headers: getAuthHeaders(),
+        });
         if (response.ok) {
           const data = await response.json();
           setOrders(data);
@@ -67,7 +76,7 @@ export default function DriverView() {
 
           await fetch("/api/driver/location", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
             body: JSON.stringify({ latitude: lat, longitude: lng }),
           });
         },

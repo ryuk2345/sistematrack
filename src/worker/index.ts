@@ -22,6 +22,32 @@ const getDB = (env: any): D1Database => env.DB || env["base de datos"];
 
 const LOCAL_SESSION_COOKIE = "sistematrack_session";
 
+// Self-contained session tokens for 100% resilient auth
+function createSessionToken(user: any): string {
+  const payload = {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    phone: user.phone || null,
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+}
+
+function verifySessionToken(token: string): any | null {
+  try {
+    const jsonStr = decodeURIComponent(escape(atob(token)));
+    const payload = JSON.parse(jsonStr);
+    if (payload && payload.exp && payload.exp > Date.now()) {
+      return payload;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
 // SHA-256 password hash using standard Web Crypto API
 async function hashPassword(password: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(password + "_sistematrack_salt_2025");
@@ -117,30 +143,40 @@ const unifiedAuthMiddleware = async (c: any, next: any) => {
 
   // 1. Check local session cookie or Authorization header
   const localToken = getCookie(c, LOCAL_SESSION_COOKIE) || c.req.header("Authorization")?.replace("Bearer ", "");
-  if (localToken && db) {
-    try {
-      const session = await db
-        .prepare(
-          `SELECT s.token, u.id, u.username, u.name, u.role, u.phone, u.pin
-           FROM sessions s
-           JOIN users u ON s.user_id = u.id
-           WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')`
-        )
-        .bind(localToken)
-        .first<any>();
+  if (localToken) {
+    // 1.1 Verify self-contained session token first (instant and 100% resilient)
+    const verifiedUser = verifySessionToken(localToken);
+    if (verifiedUser) {
+      c.set("user", verifiedUser);
+      return await next();
+    }
 
-      if (session) {
-        c.set("user", {
-          id: session.id,
-          username: session.username,
-          name: session.name,
-          role: session.role,
-          phone: session.phone,
-        });
-        return await next();
+    // 1.2 Check D1 sessions table as fallback
+    if (db) {
+      try {
+        const session = await db
+          .prepare(
+            `SELECT s.token, u.id, u.username, u.name, u.role, u.phone, u.pin
+             FROM sessions s
+             JOIN users u ON s.user_id = u.id
+             WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')`
+          )
+          .bind(localToken)
+          .first<any>();
+
+        if (session) {
+          c.set("user", {
+            id: session.id,
+            username: session.username,
+            name: session.name,
+            role: session.role,
+            phone: session.phone,
+          });
+          return await next();
+        }
+      } catch (err) {
+        console.error("Error verifying local session token in D1:", err);
       }
-    } catch (err) {
-      console.error("Error verifying local session token:", err);
     }
   }
 
@@ -228,8 +264,8 @@ app.post(
         }
       }
 
-      // Generate session token
-      const token = crypto.randomUUID();
+      // Generate resilient self-contained session token
+      const token = createSessionToken(user);
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       if (db) {

@@ -1,15 +1,20 @@
 import { useState } from "react";
-import { MapPin, Package, Truck, Clock, CheckCircle, Plus, Download } from "lucide-react";
+import { Link } from "react-router";
+import { MapPin, Package, Truck, Clock, CheckCircle, Plus, Download, UserPlus, LogOut, ArrowLeft, Shield } from "lucide-react";
 import MapView from "@/react-app/components/MapView";
 import CreateOrderModal from "@/react-app/components/CreateOrderModal";
+import RegisterDriverModal from "@/react-app/components/RegisterDriverModal";
 import { useDrivers } from "@/react-app/hooks/useDrivers";
 import { useOrders } from "@/react-app/hooks/useOrders";
+import { useAuth } from "@/react-app/context/AuthContext";
 
 export default function MonitoringDashboard() {
-  const { drivers } = useDrivers();
+  const { user, logout } = useAuth();
+  const { drivers, refetch: refetchDrivers } = useDrivers();
   const { orders, updateOrderStatus, assignOrder, refetch } = useOrders();
   const [selectedDriver, setSelectedDriver] = useState<number | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isRegisterDriverOpen, setIsRegisterDriverOpen] = useState(false);
 
   const activeDrivers = drivers.filter((d) => d.is_active);
   const pendingOrders = orders.filter((o) => o.status === "pending");
@@ -80,28 +85,60 @@ export default function MonitoringDashboard() {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                FleetTrack
-              </h1>
-              <p className="text-gray-600 mt-1">Sistema de Monitoreo de Motorizados</p>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <Link
+                to="/"
+                className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Volver al Inicio"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Link>
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                  FleetTrack
+                </h1>
+                <p className="text-xs text-gray-500">Panel de Monitoreo en Tiempo Real</p>
+              </div>
             </div>
-            <div className="flex gap-3">
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              {user && (
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 text-xs font-medium rounded-lg border border-blue-100 mr-2">
+                  <Shield className="w-3.5 h-3.5" />
+                  {user.name} ({user.role})
+                </span>
+              )}
+              <button
+                onClick={() => setIsRegisterDriverOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors text-sm font-medium"
+              >
+                <UserPlus className="w-4 h-4" />
+                Registrar Chofer
+              </button>
               <button
                 onClick={downloadReport}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shadow-sm"
               >
-                <Download className="w-5 h-5" />
-                Descargar Reporte
+                <Download className="w-4 h-4" />
+                Reporte CSV
               </button>
               <button
                 onClick={() => setIsCreateModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
                 Crear Pedido
               </button>
+              {user && (
+                <button
+                  onClick={logout}
+                  className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Cerrar Sesión"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -299,6 +336,14 @@ export default function MonitoringDashboard() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={refetch}
         drivers={activeDrivers}
+      />
+
+      <RegisterDriverModal
+        isOpen={isRegisterDriverOpen}
+        onClose={() => setIsRegisterDriverOpen(false)}
+        onSuccess={() => {
+          if (refetchDrivers) refetchDrivers();
+        }}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router";
-import { Navigation, MapPin, Phone, CheckCircle, Package, LogOut, User, ExternalLink } from "lucide-react";
-import { useAuth } from "@getmocha/users-service/react";
+import { Navigation, MapPin, Phone, CheckCircle, Package, LogOut, User, ExternalLink, Shield } from "lucide-react";
+import { useAuth } from "@/react-app/context/AuthContext";
 import WazeStyleMap from "@/react-app/components/WazeStyleMap";
 import type { Driver, Order } from "@/shared/types";
 
@@ -163,9 +163,24 @@ export default function DriverView() {
               <p className="text-gray-600">Vista de Ruta</p>
             </div>
             <div className="flex items-center gap-4">
+              <Link
+                to="/"
+                className="text-sm text-gray-500 hover:text-gray-900 transition-colors hidden sm:inline"
+              >
+                Inicio
+              </Link>
+              {user?.role === "admin" && (
+                <Link
+                  to="/monitor"
+                  className="text-xs px-2.5 py-1.5 bg-blue-50 text-blue-700 font-medium rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors flex items-center gap-1"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  Panel Monitoreo
+                </Link>
+              )}
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <MapPin className="w-4 h-4" />
-                <span>{activeOrders.length} entregas pendientes</span>
+                <span>{activeOrders.length} pendientes</span>
               </div>
               <button
                 onClick={logout}

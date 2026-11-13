@@ -17,11 +17,308 @@ interface Env {
   MOCHA_USERS_SERVICE_API_KEY: string;
 }
 
+// Resilient DB accessor: supports binding named "DB" or "base de datos"
+const getDB = (env: any): D1Database => env.DB || env["base de datos"];
+
+const LOCAL_SESSION_COOKIE = "sistematrack_session";
+
+// SHA-256 password hash using standard Web Crypto API
+async function hashPassword(password: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(password + "_sistematrack_salt_2025");
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Ensure auth tables exist and default credentials are seeded
+async function ensureAuthTables(db: D1Database) {
+  try {
+    await db.batch([
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'driver',
+          pin TEXT,
+          phone TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          expires_at DATETIME NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `),
+    ]);
+
+    // Check if default admin exists
+    const admin = await db.prepare("SELECT id FROM users WHERE username = 'admin'").first();
+    if (!admin) {
+      const adminPass = await hashPassword("admin123");
+      await db
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, name, role, phone)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind("user_admin_1", "admin", adminPass, "Administrador", "admin", "999999999")
+        .run();
+    }
+
+    // Check if default test driver exists
+    const driverUser = await db.prepare("SELECT id FROM users WHERE username = 'motorizado1'").first();
+    if (!driverUser) {
+      const driverPass = await hashPassword("1234");
+      await db
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, name, role, pin, phone)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind("user_driver_1", "motorizado1", driverPass, "Carlos Chofer", "driver", "1234", "987654321")
+        .run();
+
+      const existingDriver = await db
+        .prepare("SELECT id FROM drivers WHERE user_id = 'user_driver_1'")
+        .first();
+      if (!existingDriver) {
+        await db
+          .prepare("INSERT INTO drivers (user_id, name, phone, is_active) VALUES (?, ?, ?, 1)")
+          .bind("user_driver_1", "Carlos Chofer", "987654321")
+          .run();
+      }
+    }
+  } catch (err) {
+    console.error("Error creating/verifying auth tables in D1:", err);
+  }
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
-// ============= AUTH ENDPOINTS =============
+// Unified auth middleware: checks local credentials session first, falls back to Google/Mocha
+const unifiedAuthMiddleware = async (c: any, next: any) => {
+  const db = getDB(c.env);
+  if (db) {
+    await ensureAuthTables(db);
+  }
+
+  // 1. Check local session cookie or Authorization header
+  const localToken = getCookie(c, LOCAL_SESSION_COOKIE) || c.req.header("Authorization")?.replace("Bearer ", "");
+  if (localToken && db) {
+    try {
+      const session = await db
+        .prepare(
+          `SELECT s.token, u.id, u.username, u.name, u.role, u.phone, u.pin
+           FROM sessions s
+           JOIN users u ON s.user_id = u.id
+           WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')`
+        )
+        .bind(localToken)
+        .first<any>();
+
+      if (session) {
+        c.set("user", {
+          id: session.id,
+          username: session.username,
+          name: session.name,
+          role: session.role,
+          phone: session.phone,
+        });
+        return await next();
+      }
+    } catch (err) {
+      console.error("Error verifying local session token:", err);
+    }
+  }
+
+  // 2. Fall back to existing Mocha / Google OAuth
+  if (c.env.MOCHA_USERS_SERVICE_API_URL && c.env.MOCHA_USERS_SERVICE_API_KEY) {
+    try {
+      return await authMiddleware(c, next);
+    } catch (e) {
+      console.error("Mocha authMiddleware error:", e);
+    }
+  }
+
+  return c.json({ error: "Unauthorized" }, 401);
+};
+
+// ============= LOCAL AUTH ENDPOINTS =============
+
+// Login with username and password / PIN
+app.post(
+  "/api/auth/login",
+  zValidator(
+    "json",
+    z.object({
+      username: z.string(),
+      password: z.string(),
+    })
+  ),
+  async (c) => {
+    const db = getDB(c.env);
+    if (!db) {
+      return c.json({ error: "Base de datos D1 no conectada. Revisa el enlace D1 en Cloudflare." }, 500);
+    }
+
+    await ensureAuthTables(db);
+
+    const { username, password } = c.req.valid("json");
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    // Find user by username or phone
+    const user = await db
+      .prepare("SELECT * FROM users WHERE LOWER(username) = ? OR phone = ?")
+      .bind(cleanUsername, cleanUsername)
+      .first<any>();
+
+    if (!user) {
+      return c.json({ error: "Usuario o clave incorrectos" }, 401);
+    }
+
+    const inputHash = await hashPassword(cleanPassword);
+    const isValid = user.password_hash === inputHash || (user.pin && user.pin === cleanPassword);
+
+    if (!isValid) {
+      return c.json({ error: "Usuario o clave incorrectos" }, 401);
+    }
+
+    // Generate session token
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await db
+      .prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)")
+      .bind(token, user.id, expiresAt)
+      .run();
+
+    setCookie(c, LOCAL_SESSION_COOKIE, token, {
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: true,
+      maxAge: 30 * 24 * 60 * 60,
+    });
+
+    // Ensure driver profile exists in drivers table if user is a driver
+    if (user.role === "driver") {
+      const existingDriver = await db
+        .prepare("SELECT id FROM drivers WHERE user_id = ?")
+        .bind(user.id)
+        .first();
+
+      if (!existingDriver) {
+        await db
+          .prepare("INSERT INTO drivers (user_id, name, phone, is_active) VALUES (?, ?, ?, 1)")
+          .bind(user.id, user.name, user.phone || null)
+          .run();
+      }
+    }
+
+    return c.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+        phone: user.phone,
+      },
+    });
+  }
+);
+
+// Logout (local session)
+app.post("/api/auth/logout", async (c) => {
+  const token = getCookie(c, LOCAL_SESSION_COOKIE);
+  const db = getDB(c.env);
+  if (token && db) {
+    try {
+      await db.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    } catch (_) {}
+  }
+
+  setCookie(c, LOCAL_SESSION_COOKIE, "", {
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secure: true,
+    maxAge: 0,
+  });
+
+  return c.json({ success: true });
+});
+
+// Admin can create a new driver with username and PIN
+app.post(
+  "/api/auth/register-driver",
+  unifiedAuthMiddleware,
+  zValidator(
+    "json",
+    z.object({
+      username: z.string().min(2),
+      name: z.string().min(2),
+      phone: z.string().optional(),
+      pin: z.string().min(4),
+    })
+  ),
+  async (c) => {
+    const currentUser = c.get("user") as any;
+    if (currentUser?.role !== "admin") {
+      return c.json({ error: "Solo los administradores pueden registrar motorizados" }, 403);
+    }
+
+    const db = getDB(c.env);
+    if (!db) return c.json({ error: "Base de datos no disponible" }, 500);
+
+    const { username, name, phone, pin } = c.req.valid("json");
+    const cleanUsername = username.trim().toLowerCase();
+
+    // Check if username already exists
+    const existing = await db
+      .prepare("SELECT id FROM users WHERE LOWER(username) = ?")
+      .bind(cleanUsername)
+      .first();
+
+    if (existing) {
+      return c.json({ error: "El nombre de usuario ya está en uso" }, 400);
+    }
+
+    const userId = "driver_" + crypto.randomUUID().slice(0, 8);
+    const passHash = await hashPassword(pin.trim());
+
+    await db
+      .prepare(
+        `INSERT INTO users (id, username, password_hash, name, role, pin, phone)
+         VALUES (?, ?, ?, ?, 'driver', ?, ?)`
+      )
+      .bind(userId, cleanUsername, passHash, name.trim(), pin.trim(), phone?.trim() || null)
+      .run();
+
+    await db
+      .prepare("INSERT INTO drivers (user_id, name, phone, is_active) VALUES (?, ?, ?, 1)")
+      .bind(userId, name.trim(), phone?.trim() || null)
+      .run();
+
+    return c.json({ success: true, userId });
+  }
+);
+
+// ============= GOOGLE OAUTH / MOCHA ENDPOINTS (PRESERVED) =============
 
 app.get("/api/oauth/google/redirect_url", async (c) => {
+  if (!c.env.MOCHA_USERS_SERVICE_API_URL || !c.env.MOCHA_USERS_SERVICE_API_KEY) {
+    return c.json(
+      { error: "Google OAuth aún no está configurado en las variables de Cloudflare." },
+      400
+    );
+  }
+
   const redirectUrl = await getOAuthRedirectUrl("google", {
     apiUrl: c.env.MOCHA_USERS_SERVICE_API_URL,
     apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY,
@@ -58,18 +355,30 @@ app.post("/api/sessions", async (c) => {
   }
 });
 
-app.get("/api/users/me", authMiddleware, async (c) => {
-  return c.json(c.get("user"));
+app.get("/api/users/me", unifiedAuthMiddleware, async (c) => {
+  const user = c.get("user");
+  const db = getDB(c.env);
+  if (user && db) {
+    const driver = await db
+      .prepare("SELECT id FROM drivers WHERE user_id = ?")
+      .bind(user.id)
+      .first<any>();
+    return c.json({
+      ...user,
+      driver_id: driver?.id || null,
+    });
+  }
+  return c.json(user);
 });
 
 app.get("/api/logout", async (c) => {
   const sessionToken = getCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME);
 
-  if (typeof sessionToken === "string") {
+  if (typeof sessionToken === "string" && c.env.MOCHA_USERS_SERVICE_API_URL) {
     await deleteSession(sessionToken, {
       apiUrl: c.env.MOCHA_USERS_SERVICE_API_URL,
       apiKey: c.env.MOCHA_USERS_SERVICE_API_KEY,
-    });
+    }).catch(() => {});
   }
 
   setCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME, "", {
@@ -86,17 +395,30 @@ app.get("/api/logout", async (c) => {
 // ============= DRIVER ENDPOINTS =============
 
 // Get current driver profile for authenticated user
-app.get("/api/driver/profile", authMiddleware, async (c) => {
-  const user = c.get("user");
+app.get("/api/driver/profile", unifiedAuthMiddleware, async (c) => {
+  const user = c.get("user") as any;
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
   }
-  const db = c.env.DB;
+  const db = getDB(c.env);
 
-  const driver = await db
+  let driver = await db
     .prepare("SELECT * FROM drivers WHERE user_id = ?")
     .bind(user.id)
     .first();
+
+  // If driver record not yet created for this user, auto-create it
+  if (!driver && (user.role === "driver" || user.name)) {
+    await db
+      .prepare("INSERT INTO drivers (user_id, name, phone, is_active) VALUES (?, ?, ?, 1)")
+      .bind(user.id, user.name || "Motorizado", user.phone || null)
+      .run();
+
+    driver = await db
+      .prepare("SELECT * FROM drivers WHERE user_id = ?")
+      .bind(user.id)
+      .first();
+  }
 
   if (!driver) {
     return c.json({ error: "Driver profile not found" }, 404);
@@ -108,7 +430,7 @@ app.get("/api/driver/profile", authMiddleware, async (c) => {
 // Create or update driver profile for authenticated user
 app.post(
   "/api/driver/profile",
-  authMiddleware,
+  unifiedAuthMiddleware,
   zValidator(
     "json",
     z.object({
@@ -117,11 +439,11 @@ app.post(
     })
   ),
   async (c) => {
-    const user = c.get("user");
+    const user = c.get("user") as any;
     if (!user) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    const db = c.env.DB;
+    const db = getDB(c.env);
     const { name, phone } = c.req.valid("json");
 
     // Check if driver already exists
@@ -159,7 +481,10 @@ app.post(
 
 // Get all active drivers with their current location (for monitoring dashboard)
 app.get("/api/drivers", async (c) => {
-  const db = c.env.DB;
+  const db = getDB(c.env);
+  if (!db) return c.json([]);
+  await ensureAuthTables(db);
+
   const drivers = await db
     .prepare(
       `SELECT id, name, phone, is_active, current_latitude, current_longitude 
@@ -172,7 +497,7 @@ app.get("/api/drivers", async (c) => {
 
 // Get specific driver details
 app.get("/api/drivers/:id", async (c) => {
-  const db = c.env.DB;
+  const db = getDB(c.env);
   const id = c.req.param("id");
   const driver = await db
     .prepare("SELECT * FROM drivers WHERE id = ?")
@@ -189,7 +514,7 @@ app.get("/api/drivers/:id", async (c) => {
 // Update driver location (authenticated)
 app.post(
   "/api/driver/location",
-  authMiddleware,
+  unifiedAuthMiddleware,
   zValidator(
     "json",
     z.object({
@@ -198,21 +523,26 @@ app.post(
     })
   ),
   async (c) => {
-    const user = c.get("user");
+    const user = c.get("user") as any;
     if (!user) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    const db = c.env.DB;
+    const db = getDB(c.env);
     const { latitude, longitude } = c.req.valid("json");
 
     // Get driver by user_id
-    const driver = await db
+    let driver = await db
       .prepare("SELECT id FROM drivers WHERE user_id = ?")
       .bind(user.id)
       .first<{ id: number }>();
 
+    // Auto-create driver record if missing
     if (!driver) {
-      return c.json({ error: "Driver profile not found" }, 404);
+      const res = await db
+        .prepare("INSERT INTO drivers (user_id, name, phone, is_active) VALUES (?, ?, ?, 1)")
+        .bind(user.id, user.name || "Motorizado", user.phone || null)
+        .run();
+      driver = { id: res.meta.last_row_id as number };
     }
 
     // Update current location
@@ -242,7 +572,10 @@ app.post(
 
 // Get all orders
 app.get("/api/orders", async (c) => {
-  const db = c.env.DB;
+  const db = getDB(c.env);
+  if (!db) return c.json([]);
+  await ensureAuthTables(db);
+
   const status = c.req.query("status");
   const driverId = c.req.query("driver_id");
   const date = c.req.query("date");
@@ -274,12 +607,12 @@ app.get("/api/orders", async (c) => {
 });
 
 // Get orders for authenticated driver
-app.get("/api/driver/orders", authMiddleware, async (c) => {
+app.get("/api/driver/orders", unifiedAuthMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
   }
-  const db = c.env.DB;
+  const db = getDB(c.env);
 
   // Get driver by user_id
   const driver = await db
@@ -288,7 +621,7 @@ app.get("/api/driver/orders", authMiddleware, async (c) => {
     .first<{ id: number }>();
 
   if (!driver) {
-    return c.json({ error: "Driver profile not found" }, 404);
+    return c.json([]);
   }
 
   const orders = await db
@@ -305,7 +638,7 @@ app.get("/api/driver/orders", authMiddleware, async (c) => {
 
 // Get orders for a specific driver (for monitoring)
 app.get("/api/drivers/:id/orders", async (c) => {
-  const db = c.env.DB;
+  const db = getDB(c.env);
   const id = c.req.param("id");
 
   const orders = await db
@@ -339,7 +672,7 @@ app.post(
     })
   ),
   async (c) => {
-    const db = c.env.DB;
+    const db = getDB(c.env);
     const data = c.req.valid("json");
 
     const result = await db
@@ -378,7 +711,7 @@ app.patch(
     })
   ),
   async (c) => {
-    const db = c.env.DB;
+    const db = getDB(c.env);
     const id = c.req.param("id");
     const { status } = c.req.valid("json");
 
@@ -405,7 +738,7 @@ app.patch(
     })
   ),
   async (c) => {
-    const db = c.env.DB;
+    const db = getDB(c.env);
     const id = c.req.param("id");
     const { driver_id } = c.req.valid("json");
 
@@ -424,7 +757,7 @@ app.patch(
 
 // Get location history for a driver
 app.get("/api/drivers/:id/history", async (c) => {
-  const db = c.env.DB;
+  const db = getDB(c.env);
   const id = c.req.param("id");
   const limit = c.req.query("limit") || "100";
 

@@ -32,3 +32,14 @@ export interface LocationHistory {
   longitude: number;
   created_at: string;
 }
+
+export interface User {
+  id: string;
+  username: string;
+  name: string;
+  role: "admin" | "driver";
+  phone?: string | null;
+  email?: string | null;
+  driver_id?: number | null;
+}
+

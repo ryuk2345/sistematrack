@@ -1,28 +1,43 @@
+import { useState } from "react";
 import { Link } from "react-router";
-import { useAuth } from "@getmocha/users-service/react";
-import { Monitor, Smartphone, MapPin, TrendingUp, LogIn, LogOut } from "lucide-react";
+import { useAuth } from "@/react-app/context/AuthContext";
+import { Monitor, Smartphone, MapPin, TrendingUp, LogIn, LogOut, Shield, KeyRound } from "lucide-react";
+import LoginModal from "@/react-app/components/LoginModal";
 
 export default function HomePage() {
-  const { user, redirectToLogin, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [modalDefaultRole, setModalDefaultRole] = useState<"admin" | "driver">("admin");
+
+  const openLogin = (role: "admin" | "driver") => {
+    setModalDefaultRole(role);
+    setIsLoginModalOpen(true);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 text-white">
       <div className="max-w-6xl mx-auto px-6 py-16">
         {/* Header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-12">
           <div className="flex justify-end mb-4">
             {user ? (
-              <button
-                onClick={logout}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/20"
-              >
-                <LogOut className="w-4 h-4" />
-                Cerrar Sesión
-              </button>
+              <div className="flex items-center gap-3">
+                <span className="text-xs bg-white/10 px-3 py-1.5 rounded-full border border-white/20 flex items-center gap-1.5 text-blue-200">
+                  <Shield className="w-3.5 h-3.5 text-blue-400" />
+                  {user.name} ({user.role === "admin" ? "Administrador" : "Motorizado"})
+                </span>
+                <button
+                  onClick={logout}
+                  className="flex items-center gap-2 px-4 py-2 text-sm bg-red-500/20 hover:bg-red-500/30 text-red-200 rounded-lg transition-colors border border-red-500/30"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Cerrar Sesión
+                </button>
+              </div>
             ) : (
               <button
-                onClick={redirectToLogin}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                onClick={() => openLogin("admin")}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 rounded-xl transition-all shadow-lg shadow-blue-500/25"
               >
                 <LogIn className="w-4 h-4" />
                 Iniciar Sesión
@@ -35,6 +50,22 @@ export default function HomePage() {
           <p className="text-xl text-blue-200">
             Sistema de Monitoreo de Motorizados en Tiempo Real
           </p>
+        </div>
+
+        {/* Credentials Quick Banner */}
+        <div className="max-w-2xl mx-auto mb-12 p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 text-center">
+          <div className="flex items-center justify-center gap-2 text-xs font-semibold text-blue-300 uppercase tracking-wider mb-2">
+            <KeyRound className="w-4 h-4 text-yellow-400" />
+            Credenciales de Acceso Rápido
+          </div>
+          <div className="flex flex-wrap justify-center gap-4 text-sm text-slate-300">
+            <span className="bg-slate-800/80 px-3 py-1 rounded-lg border border-slate-700">
+              🛡️ <strong>Admin:</strong> <code className="text-blue-300">admin</code> / <code className="text-blue-300">admin123</code>
+            </span>
+            <span className="bg-slate-800/80 px-3 py-1 rounded-lg border border-slate-700">
+              🛵 <strong>Motorizado:</strong> <code className="text-indigo-300">motorizado1</code> / PIN: <code className="text-indigo-300">1234</code>
+            </span>
+          </div>
         </div>
 
         {/* Features */}
@@ -106,7 +137,7 @@ export default function HomePage() {
             </Link>
           ) : (
             <button
-              onClick={redirectToLogin}
+              onClick={() => openLogin("driver")}
               className="group relative px-8 py-4 bg-white/10 backdrop-blur-sm border-2 border-white/30 rounded-xl font-semibold text-lg hover:bg-white/20 transition-all flex items-center gap-2"
             >
               <Smartphone className="w-5 h-5" />
@@ -115,18 +146,14 @@ export default function HomePage() {
             </button>
           )}
         </div>
-
-        {/* Demo Info */}
-        <div className="mt-16 text-center">
-          <p className="text-blue-200 text-sm">
-            {user ? (
-              <>Has iniciado sesión como: {user.email}</>
-            ) : (
-              <>Inicia sesión con Google para acceder como motorizado</>
-            )}
-          </p>
-        </div>
       </div>
+
+      {/* Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        defaultRole={modalDefaultRole}
+      />
     </div>
   );
 }

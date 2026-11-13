@@ -140,19 +140,41 @@ export default function DriverView() {
 
   if (!driver) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center">
-        <div className="text-center bg-white rounded-xl shadow-lg p-8 max-w-md">
-          <User className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Perfil no encontrado</h2>
-          <p className="text-gray-600 mb-6">
-            No tienes un perfil de motorizado configurado. Contacta al administrador.
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="text-center bg-white rounded-2xl shadow-xl p-8 max-w-md w-full border border-gray-100">
+          <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <User className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            {user?.role === "admin" ? "Modo Administrador" : "Perfil de Motorizado"}
+          </h2>
+          <p className="text-gray-600 mb-6 text-sm">
+            {user?.role === "admin"
+              ? "Has iniciado sesión como Administrador. Tu función principal está en el Panel de Monitoreo."
+              : "No se encontró un perfil de chofer activo vinculado a esta cuenta."}
           </p>
-          <button
-            onClick={logout}
-            className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Cerrar Sesión
-          </button>
+
+          <div className="space-y-3">
+            <Link
+              to="/monitor"
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium shadow-sm"
+            >
+              <Shield className="w-4 h-4" />
+              Ir al Panel de Monitoreo
+            </Link>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full inline-flex items-center justify-center px-6 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors text-sm font-medium"
+            >
+              Reintentar Carga
+            </button>
+            <button
+              onClick={logout}
+              className="w-full inline-flex items-center justify-center px-6 py-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-colors text-sm"
+            >
+              Cerrar Sesión
+            </button>
+          </div>
         </div>
       </div>
     );
